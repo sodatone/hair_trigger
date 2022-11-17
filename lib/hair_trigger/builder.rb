@@ -86,6 +86,10 @@ module HairTrigger
       options[:declarations] = declarations
     end
 
+    def reference(references)
+      options[:references] = references
+    end
+
     # noop, just a way you can pass a block within a trigger group
     def all
     end
@@ -159,7 +163,7 @@ module HairTrigger
         METHOD
       end
     end
-    chainable_methods :name, :on, :for_each, :before, :after, :where, :security, :timing, :events, :all, :nowrap, :of, :declare
+    chainable_methods :name, :on, :for_each, :before, :after, :where, :security, :timing, :events, :all, :nowrap, :of, :declare, :reference
 
     def create_grouped_trigger?
       adapter_name == :mysql
@@ -310,6 +314,8 @@ module HairTrigger
             "for_each(#{options[:for_each].downcase.to_sym.inspect})"
           when :declare
             "declare(#{options[:declarations].inspect})"
+          when :reference
+            "reference(#{options[:references].inspect})"
           when :all
             'all'
           else
@@ -394,6 +400,12 @@ module HairTrigger
       "\nDECLARE\n" + normalize(declarations.sub(/;?\n?\z/, ';'), 1).rstrip
     end
 
+    def references
+      return unless references = options[:references]
+
+      "\nREFERENCING\n" + normalize(references, 1).rstrip
+    end
+
     def supports_of?
       case adapter_name
       when :sqlite
@@ -431,6 +443,7 @@ END;
       raise GenerationError, "FOR EACH ROW triggers may not be triggered by truncate events" if options[:for_each] == 'ROW' && options[:events].include?('TRUNCATE')
       raise GenerationError, "declare cannot be used in conjunction with nowrap" if options[:nowrap] && options[:declare]
       raise GenerationError, "security cannot be used in conjunction with nowrap" if options[:nowrap] && options[:security]
+      raise GenerationError, "references can only be used in statement queries" if options[:references] && options[:for_each] != 'STATEMENT'
       raise GenerationError, "where can only be used in conjunction with nowrap on postgres 9.0 and greater" if options[:nowrap] && prepared_where && db_version < 90000
       raise GenerationError, "of can only be used in conjunction with nowrap on postgres 9.1 and greater" if options[:nowrap] && options[:of] && db_version < 90100
 
@@ -471,7 +484,7 @@ $$ LANGUAGE plpgsql#{security ? " SECURITY #{security.to_s.upcase}" : ""};
       end
 
       [sql, <<-SQL]
-CREATE TRIGGER #{prepared_name} #{options[:timing]} #{options[:events].join(" OR ")} #{of_clause}ON #{adapter.quote_table_name(options[:table])}
+CREATE TRIGGER #{prepared_name} #{options[:timing]} #{options[:events].join(" OR ")} #{of_clause}ON #{adapter.quote_table_name(options[:table])}#{options[:references] ? " REFERENCING #{options[:references]}" : ''}
 FOR EACH #{options[:for_each]}#{prepared_where && db_version >= 90000 ? " WHEN (" + prepared_where + ')': ''} EXECUTE PROCEDURE #{trigger_action};
       SQL
     end
